@@ -12,6 +12,11 @@ struct vec{
 		for (size_t i = 0; i < DIM; i++)
 			data_[i] = T();
 	}
+	template<typename U>
+	vec(std::initializer_list<U> l){
+		assert(l.size() == DIM);
+		std::copy(l.begin(), l.end(), data_);
+	}
 
 	T& operator[](const size_t i){
 		assert(i < DIM);
@@ -65,7 +70,8 @@ struct vec<3, T> {
 	}
 
 	vec<3, T>& normalize(){
-		*this = (*this) / norm();
+		if (norm() != 0)
+			*this = (*this) / norm();
 		return *this;
 	}
 

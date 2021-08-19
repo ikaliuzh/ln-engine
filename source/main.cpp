@@ -6,16 +6,19 @@
 #include <vector>
 #include "geometry.h"
 
+const size_t MAX_RAY_CAST_RECURSION_DEPTH = 4;
+
 struct Material{
-	Material(const vec<2, float>& alb, const vec<3, float>& color, const float& spec)
-		: albedo(alb),
+	Material(float r, const vec<4, float>& alb, const vec<3, float>& color, const float& spec)
+		: refractive_index(r),
+		  albedo(alb),
 		  diffuse_color(color),
 		  specular_exponent(spec){}
-	Material() : albedo(1, 0), diffuse_color(), specular_exponent(){}
+	Material() : albedo({1, 0, 0, 0}), diffuse_color(), specular_exponent(){}
 
-	vec<2, float> albedo;
+	vec<4, float> albedo; // diffuse, specular, reflection
 	vec<3, float> diffuse_color;
-	float specular_exponent;
+	float specular_exponent, refractive_index;
 
 };
 
@@ -29,6 +32,22 @@ struct Light{
 
 vec<3, float> reflect(const vec<3, float>& L, const vec<3, float>& N){
 	return L - 2.f*(L*N)*N;
+}
+
+vec<3, float> refract(const vec<3, float>& L, const vec<3, float>& N, const float& refractive_index){
+	float cosl = - std::max(-1.f, std::min(1.f, L*N));
+	float etal = 1;
+	float etar = refractive_index;
+	vec<3, float> n = N;
+	if (cosl < 0){
+		cosl = -cosl;
+		std::swap(etal, etar);
+		n = -N;
+	}
+    float eta = etal / etar;
+    float k = 1 - eta*eta*(1 - cosl*cosl);
+
+    return k < 0 ? vec<3, float>(0,0,0) : L*eta + n*(eta * cosl - sqrtf(k));
 }
 
 struct Sphere {
@@ -81,11 +100,12 @@ vec<3, float> cast_ray(
 		const vec<3, float> &orig,
 		const vec<3, float> &dir,
 		const std::vector<Sphere>& spheres,
-		const std::vector<Light>& lights) {
+		const std::vector<Light>& lights,
+		size_t recursion_depth = 0) {
 	vec<3, float> point, N;
 	Material material;
 
-	if (!scene_intersect(orig, dir, spheres, point, N, material)) {
+	if (recursion_depth>MAX_RAY_CAST_RECURSION_DEPTH || !scene_intersect(orig, dir, spheres, point, N, material)) {
         return vec<3, float>(0.2, 0.7, 0.8);
     }
 
@@ -106,7 +126,18 @@ vec<3, float> cast_ray(
 		specular_light_intensity += lights[i].intensity * powf(std::max(0.f, reflect(light_dir, N)*dir), material.specular_exponent);
 	}
 
-	return material.diffuse_color * diffuse_light_intensity * material.albedo[0] + vec<3,float>(1., 1., 1.)*specular_light_intensity * material.albedo[1];
+	vec<3, float> reflected_dir = reflect(dir, N);
+	vec<3, float> reflected_orig = reflected_dir*N < 0 ? point - N*1e-3 : point + N*1e-3;
+	vec<3, float> reflected_color = cast_ray(reflected_orig, reflected_dir, spheres, lights, recursion_depth+1);
+
+	vec<3, float> refracted_dir = refract(dir, N, material.refractive_index).normalize();
+	vec<3, float> refracted_orig = refracted_dir*N < 0 ? point - N*1e-3 : point + N*1e-3;
+	vec<3, float> refracted_color = cast_ray(refracted_orig, refracted_dir, spheres, lights, recursion_depth+1);
+
+	return material.diffuse_color * diffuse_light_intensity * material.albedo[0] +
+			vec<3,float>(1., 1., 1.)*specular_light_intensity * material.albedo[1] +
+			reflected_color * material.albedo[2] +
+			refracted_color * material.albedo[3];
 }
 
 
@@ -142,14 +173,16 @@ void render(const std::vector<Sphere>& spheres, const std::vector<Light>& lights
 }
 
 int main() {
-    Material      ivory({0.6, 0.3}, {0.4, 0.4, 0.3}, 50);
-    Material red_rubber({0.9, 0.1}, {0.3, 0.1, 0.1}, 10);
+    Material      ivory(1.0, vec<4, float>({0.6,  0.3, 0.1, 0.0}), vec<3, float>(0.4, 0.4, 0.3),   50.);
+    Material      glass(1.5, vec<4, float>({0.0,  0.5, 0.1, 0.8}), vec<3, float>(0.6, 0.7, 0.8),  125.);
+    Material red_rubber(1.0, vec<4, float>({0.9,  0.1, 0.0, 0.0}), vec<3, float>(0.3, 0.1, 0.1),   10.);
+    Material     mirror(1.0, vec<4, float>({0.0, 10.0, 0.8, 0.0}), vec<3, float>(1.0, 1.0, 1.0), 1425.);
 
     std::vector<Sphere> spheres;
     spheres.push_back(Sphere(vec<3, float>(-3,    0,   -16), 2,      ivory));
-    spheres.push_back(Sphere(vec<3, float>(-1.0, -1.5, -12), 2, red_rubber));
+    spheres.push_back(Sphere(vec<3, float>(-1.0, -1.5, -12), 2, glass));
     spheres.push_back(Sphere(vec<3, float>( 1.5, -0.5, -18), 3, red_rubber));
-    spheres.push_back(Sphere(vec<3, float>( 7,    5,   -18), 4,      ivory));
+    spheres.push_back(Sphere(vec<3, float>( 3,   10,   -18), 4,      mirror));
 
      std::vector<Light>  lights;
      lights.push_back(Light(vec<3, float>(-20, 20,  20), 1.5));
