@@ -114,6 +114,15 @@ vec<DIM, T> operator* (const vec<DIM, T>& lhs, U rhs){
 	return res;
 }
 
+template<size_t DIM, typename T, typename U>
+vec<DIM, T> operator/ (const vec<DIM, T>& lhs, U rhs){
+	vec<DIM, T> res;
+	for (size_t i = 0; i < DIM; ++i){
+		res[i] = lhs[i] / rhs;
+	}
+	return res;
+}
+
 template<size_t DIM,typename T>
 vec<DIM,T> operator-(const vec<DIM,T> &lhs) {
     return lhs*T(-1);
