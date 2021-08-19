@@ -7,10 +7,16 @@
 #include "geometry.h"
 
 struct Material{
-	Material(const vec<3, float>& color) : diffuse_color(color) {}
-	Material() : diffuse_color(){}
+	Material(const vec<2, float>& alb, const vec<3, float>& color, const float& spec)
+		: albedo(alb),
+		  diffuse_color(color),
+		  specular_exponent(spec){}
+	Material() : albedo(1, 0), diffuse_color(), specular_exponent(){}
 
+	vec<2, float> albedo;
 	vec<3, float> diffuse_color;
+	float specular_exponent;
+
 };
 
 struct Light{
@@ -20,6 +26,10 @@ struct Light{
 	vec<3, float> position;
 	float intensity;
 };
+
+vec<3, float> reflect(const vec<3, float>& L, const vec<3, float>& N){
+	return L - 2.f*(L*N)*N;
+}
 
 struct Sphere {
 	vec<3, float> center;
@@ -64,7 +74,7 @@ bool scene_intersect(
 		}
 	}
 	// finally hit, N, material correspond to those of the closest sphere
-	return spheres_dist < 100;
+	return spheres_dist < 1000;
 }
 
 vec<3, float> cast_ray(
@@ -80,13 +90,23 @@ vec<3, float> cast_ray(
     }
 
 	float diffuse_light_intensity = 0;
+	float specular_light_intensity = 0;
 
 	for (size_t i = 0; i < lights.size(); ++i){
 		vec<3, float> light_dir = (lights[i].position - point).normalize();
+		float light_dist = (lights[i].position - point).norm();
+
+		vec<3, float> shadow_orig = (light_dir*N < 0)? point - N*1e-3 : point + N*1e-3;
+        vec<3, float> shadow_pt, shadow_N;
+        Material tmpmaterial;
+        if (scene_intersect(shadow_orig, light_dir, spheres, shadow_pt, shadow_N, tmpmaterial) && (shadow_pt-shadow_orig).norm() < light_dist)
+            continue;
+
 		diffuse_light_intensity += lights[i].intensity * std::max<float>(0.0, light_dir * N);
+		specular_light_intensity += lights[i].intensity * powf(std::max(0.f, reflect(light_dir, N)*dir), material.specular_exponent);
 	}
 
-    return material.diffuse_color * diffuse_light_intensity;
+	return material.diffuse_color * diffuse_light_intensity * material.albedo[0] + vec<3,float>(1., 1., 1.)*specular_light_intensity * material.albedo[1];
 }
 
 
@@ -97,7 +117,7 @@ void render(const std::vector<Sphere>& spheres, const std::vector<Light>& lights
     const int fov      = M_PI/2.;
     std::vector<vec<3, float>> framebuffer(width*height);
 
-	#pragma omp parallel for
+	// #pragma omp parallel for
     for (size_t j = 0; j<height; j++) {
         for (size_t i = 0; i<width; i++) {
             float x =  (2*(i + 0.5)/(float)width  - 1)*tan(fov/2.)*width/(float)height;
@@ -112,6 +132,9 @@ void render(const std::vector<Sphere>& spheres, const std::vector<Light>& lights
     ofs << "P6\n" << width << " " << height << "\n255\n";
     for (size_t i = 0; i < height*width; ++i) {
         for (size_t j = 0; j<3; j++) {
+            vec<3, float> &c = framebuffer[i];
+            float max = std::max(c[0], std::max(c[1], c[2]));
+            if (max>1) c = c*(1./max);
             ofs << (char)(255 * std::max(0.f, std::min(1.f, framebuffer[i][j])));
         }
     }
@@ -119,8 +142,8 @@ void render(const std::vector<Sphere>& spheres, const std::vector<Light>& lights
 }
 
 int main() {
-    Material      ivory(vec<3, float>(0.4, 0.4, 0.3));
-    Material red_rubber(vec<3, float>(0.3, 0.1, 0.1));
+    Material      ivory({0.6, 0.3}, {0.4, 0.4, 0.3}, 50);
+    Material red_rubber({0.9, 0.1}, {0.3, 0.1, 0.1}, 10);
 
     std::vector<Sphere> spheres;
     spheres.push_back(Sphere(vec<3, float>(-3,    0,   -16), 2,      ivory));
@@ -128,8 +151,10 @@ int main() {
     spheres.push_back(Sphere(vec<3, float>( 1.5, -0.5, -18), 3, red_rubber));
     spheres.push_back(Sphere(vec<3, float>( 7,    5,   -18), 4,      ivory));
 
-    std::vector<Light> lights;
-    lights.push_back(Light(vec<3, float>(-10, 10, -2), 2.0));
+     std::vector<Light>  lights;
+     lights.push_back(Light(vec<3, float>(-20, 20,  20), 1.5));
+     lights.push_back(Light(vec<3, float>( 30, 50, -25), 1.8));
+     lights.push_back(Light(vec<3, float>( 30, 20,  30), 1.7));
 
     render(spheres, lights);
     return 0;
